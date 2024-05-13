@@ -4,9 +4,8 @@ import requests
 import whisper
 import pyttsx3
 import speech_recognition as sr
-import io
+import shutil
 import os
-from pydub import AudioSegment
 import tempfile
 import datetime
 
@@ -81,10 +80,33 @@ def check_medication_times(medications, current_time):
             if t == current_time:
                 print(f"Es hora de tomar tu medicamento: {name} ({med['brand']})")
 
+def cargarMedicamentos():
+    with open('docs/medicamentos.txt', 'rb') as archivo:
+        files = {"file": archivo}
+        response = requests.post(urlDoc, files=files)
+
+        if response.status_code == 200:
+            print("Medicamentos cargados")
+        else:
+            print(f"Error al enviar archivo: Código de estado {response.status_code}")
+
+def borrarBD():
+    folder="db"
+    for filename in os.listdir(folder):
+        file_path = os.path.join(folder, filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            print(f'Failed to delete {file_path}. Reason: {e}')
+    print("Base de datos borrada")
 
 def main():
-    keyword_detected = False
+    borrarBD()
     current_time = cambiarHora()
+    cargarMedicamentos()
 
     while True:
         
