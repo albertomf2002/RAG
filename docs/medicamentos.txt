@@ -1,0 +1,23 @@
+{
+    "medications": [
+      {
+        "name": "Acetaminofén",
+        "alt_name": "Paracetamol",
+        "brand": "Tylenol",
+        "hours": "8:00, 22:00"
+      },
+      {
+        "name": "Advil",
+        "alt_name": "Ibuprofeno",
+        "brand": "Motrin",
+        "hours": "14:00"
+      },
+      {
+        "name": "Difenhidramina",
+        "alt_name": "Benadryl",
+        "brand": "Benadryl",
+        "hours": "8:00, 14:00, 22:00"
+      }
+    ]
+  }
+  
