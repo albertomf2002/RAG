@@ -10,7 +10,7 @@ import tempfile
 import datetime
 
 url = "http://localhost:8080/ask"
-urlDoc= "http://localhost:8080/docs"
+urlDoc = "http://localhost:8080/docs"
 
 file = tempfile.mkdtemp()
 path = os.path.join(file, 'temp.wav')
@@ -21,6 +21,10 @@ engine = pyttsx3.init()
 voices = engine.getProperty("voices")
 engine.setProperty('rate', 145)
 engine.setProperty('voice', voices[0].id)
+
+clave = 'acho'
+
+pendientes = []
 
 def talk(text):
     engine.say(text)
@@ -33,9 +37,9 @@ def listen_once():
         try:
             audio = listener.listen(source, timeout=5, phrase_time_limit=5)
             detected_text = listener.recognize_google(audio, language='es-ES')
-            if 'ordenador' in detected_text.lower():
+            if clave in detected_text.lower():
                 print("Palabra clave detectada. Escuchando...")
-                return True, detected_text[detected_text.lower().index('ordenador') + len('ordenador'):].strip()
+                return True, detected_text[detected_text.lower().index(clave) + len(clave):].strip()
             else:
                 return False, ""
         except sr.UnknownValueError:
@@ -46,7 +50,21 @@ def listen_once():
             print("No se detectó ninguna entrada de voz.")
     return False, ""
 
-
+def listen_for_question():
+    with sr.Microphone() as source:
+        print("Escuchando pregunta...")
+        listener.adjust_for_ambient_noise(source)
+        try:
+            audio = listener.listen(source, timeout=5, phrase_time_limit=5)
+            detected_text = listener.recognize_google(audio, language='es-ES')
+            return detected_text.strip()
+        except sr.UnknownValueError:
+            print("No se pudo entender el audio.")
+        except sr.RequestError as e:
+            print(f"Error de la API de reconocimiento de voz; {e}")
+        except sr.WaitTimeoutError:
+            print("No se detectó ninguna entrada de voz.")
+    return ""
 
 def recognize_audio(path):
     model = whisper.load_model("base")
@@ -73,12 +91,62 @@ def cambiarHora():
     return current_time
 
 def check_medication_times(medications, current_time):
+    need_to_take = []
     for med in medications:
         name = med['name']
-        times = med['hours'].split(', ')
-        for t in times:
-            if t == current_time:
-                print(f"Es hora de tomar tu medicamento: {name} ({med['brand']})")
+        alt_name = med.get('alt_name', 'N/A')
+        for time_entry in med['hours']:
+            if time_entry['hour'] == current_time and time_entry['taken'] == True:
+                time_entry['taken'] = False
+                need_to_take.append((name, alt_name, time_entry))
+
+                tomar_medicamento = (f"Es hora de tomar tu medicamento: {name} ({alt_name})")
+                print(tomar_medicamento)
+                talk(tomar_medicamento)
+    return need_to_take
+
+def save_medications(medications):
+    with open('docs/medicamentos.txt', 'w') as file:
+        json.dump(medications, file, indent=4)
+
+def preguntar_medicamento(medicamento, medications):
+    print(f"¿Has tomado tu medicamento {medicamento['name']} ({medicamento['alt_name']})?")
+    talk(f"¿Has tomado tu medicamento {medicamento['name']} ({medicamento['alt_name']})?")
+    respuesta = listen_for_confirmation()
+    if respuesta == "sí":
+        for med in medications:
+            if med['name'] == medicamento['name'] and med.get('alt_name') == medicamento['alt_name']:
+                for time_entry in med['hours']:
+                    if time_entry['hour'] == medicamento['hour']:
+                        time_entry['taken'] = True
+                        break
+        print("Gracias por confirmar. Marcaré el medicamento como tomado.")
+        talk("Gracias por confirmar. Marcaré el medicamento como tomado.")
+        save_medications(medications)
+        return True
+    else:
+        print("Te volveré a preguntar en 30 minutos.")
+        talk("Te volveré a preguntar en 30 minutos.")
+        return False
+
+def listen_for_confirmation():
+    with sr.Microphone() as source:
+        print("Esperando confirmación...")
+        listener.adjust_for_ambient_noise(source)
+        try:
+            audio = listener.listen(source, timeout=5, phrase_time_limit=5)
+            detected_text = listener.recognize_google(audio, language='es-ES')
+            if "sí" in detected_text.lower():
+                return "sí"
+            elif "no" in detected_text.lower():
+                return "no"
+        except sr.UnknownValueError:
+            print("No se pudo entender el audio.")
+        except sr.RequestError as e:
+            print(f"Error de la API de reconocimiento de voz; {e}")
+        except sr.WaitTimeoutError:
+            print("No se detectó ninguna entrada de voz.")
+    return "no"
 
 def cargarMedicamentos():
     with open('docs/medicamentos.txt', 'rb') as archivo:
@@ -91,7 +159,7 @@ def cargarMedicamentos():
             print(f"Error al enviar archivo: Código de estado {response.status_code}")
 
 def borrarBD():
-    folder="db"
+    folder = "db"
     for filename in os.listdir(folder):
         file_path = os.path.join(folder, filename)
         try:
@@ -103,40 +171,66 @@ def borrarBD():
             print(f'Failed to delete {file_path}. Reason: {e}')
     print("Base de datos borrada")
 
+def verificar_pendientes(medications):
+    global pendientes
+    nuevas_pendientes = []
+    for tarea in pendientes:
+        med_name, med_alt_name, med_entry, last_checked = tarea
+        if (datetime.datetime.now() - last_checked).total_seconds() >= 1800:  # 30 minutos
+            if preguntar_medicamento({"name": med_name, "alt_name": med_alt_name, "hour": med_entry['hour'], "taken": med_entry['taken']}, medications):
+                med_entry['taken'] = True
+            else:
+                nuevas_pendientes.append((med_name, med_alt_name, med_entry, datetime.datetime.now()))
+        else:
+            nuevas_pendientes.append(tarea)
+    pendientes = nuevas_pendientes
+    save_medications(medications)
+
 def main():
     borrarBD()
     current_time = cambiarHora()
     cargarMedicamentos()
 
     while True:
-        
         if current_time != datetime.datetime.now().strftime("%H:%M"):
             current_time = cambiarHora()
 
         with open('docs/medicamentos.txt', 'r') as file:
-            medicamentos_data = json.load(file)
+            medications = json.load(file)
 
-        check_medication_times(medicamentos_data['medications'], current_time)
-        
+        need_to_take = check_medication_times(medications, current_time)
+
+        for med in need_to_take:
+            pendientes.append((med[0], med[1], med[2], datetime.datetime.now()))
+
+        verificar_pendientes(medications)
+
         keyword_detected, message = listen_once()
         if keyword_detected:
             print("\nMensaje recibido después de la palabra clave")
-            if message:
-                print("Usuario: " + message)
-                if message.lower().__contains__('terminar'):
-                    talk("Terminar")
-                    break
-                else:
-                    data = {"query": message}
-                    print("Generando respuesta...")
-                    response = requests.post(url, json=data)
-                    if response.status_code == 200:
-                        response_data = response.json()
-                        print(f"Respuesta: {response_data}")
-                        talk(response_data)
+            while True:
+                if message:
+                    print("Usuario: " + message)
+                    if message.lower().__contains__('terminar'):
+                        talk("Terminar")
+                        return
                     else:
-                        print(f"Error al generar respuesta: Código de estado {response.status_code}")
-                        talk(f"Error al generar respuesta: Código de estado {response.status_code}")
+                        data = {"query": message}
+                        print("Generando respuesta...")
+                        response = requests.post(url, json=data)
+                        if response.status_code == 200:
+                            response_data = response.json()
+                            print(f"Respuesta: {response_data}")
+                            talk(response_data)
+                        else:
+                            print(f"Error al generar respuesta: Código de estado {response.status_code}")
+                            talk(f"Error al generar respuesta: Código de estado {response.status_code}")
+
+                print("Esperando 5 segundos para otra pregunta...")
+                message = listen_for_question()
+                if not message:
+                    break
+
         else:
             print("Palabra clave no detectada, reintentando...")
             time.sleep(1)

@@ -1,23 +1,44 @@
-{
-    "medications": [
-      {
-        "name": "Acetaminofén",
+[
+    {
+        "name": "Acetaminofen",
         "alt_name": "Paracetamol",
-        "brand": "Tylenol",
-        "hours": "8:00, 22:00"
-      },
-      {
+        "hours": [
+            {
+                "hour": "14:00",
+                "taken": true
+            },
+            {
+                "hour": "22:00",
+                "taken": true
+            }
+        ]
+    },
+    {
         "name": "Advil",
         "alt_name": "Ibuprofeno",
-        "brand": "Motrin",
-        "hours": "14:00"
-      },
-      {
+        "hours": [
+            {
+                "hour": "00:07",
+                "taken": true
+            }
+        ]
+    },
+    {
         "name": "Difenhidramina",
         "alt_name": "Benadryl",
-        "brand": "Benadryl",
-        "hours": "8:00, 14:00, 22:00"
-      }
-    ]
-  }
-  
+        "hours": [
+            {
+                "hour": "08:00",
+                "taken": true
+            },
+            {
+                "hour": "14:00",
+                "taken": true
+            },
+            {
+                "hour": "22:00",
+                "taken": true
+            }
+        ]
+    }
+]
