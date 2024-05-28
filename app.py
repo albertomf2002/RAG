@@ -1,21 +1,20 @@
-import json
-import time
 import requests
-import whisper
 import pyttsx3
 import speech_recognition as sr
 import shutil
 import os
 import tempfile
 import datetime
+import whisper
+import threading
+import json
 
 url = "http://localhost:8080/ask"
 urlDoc = "http://localhost:8080/docs"
+log_file = 'docs/log.txt'
 
 file = tempfile.mkdtemp()
 path = os.path.join(file, 'temp.wav')
-
-listener = sr.Recognizer()
 
 engine = pyttsx3.init()
 voices = engine.getProperty("voices")
@@ -24,139 +23,56 @@ engine.setProperty('voice', voices[0].id)
 
 clave = 'acho'
 
-pendientes = []
+avisos = []
+
+model = whisper.load_model("base")
 
 def talk(text):
     engine.say(text)
     engine.runAndWait()
 
-def listen_once():
+def esperando_clave():
+    recognizer = sr.Recognizer()
     with sr.Microphone() as source:
         print("Esperando palabra clave...")
-        listener.adjust_for_ambient_noise(source)
+        recognizer.adjust_for_ambient_noise(source)
         try:
-            audio = listener.listen(source, timeout=5, phrase_time_limit=5)
-            detected_text = listener.recognize_google(audio, language='es-ES')
-            if clave in detected_text.lower():
+            audio = recognizer.listen(source, timeout=5, phrase_time_limit=5)
+            with open(path, "wb") as f:
+                f.write(audio.get_wav_data())
+
+            result = model.transcribe(path, language="spanish")
+            detected_text = result["text"].strip().lower()
+
+            if clave in detected_text:
                 print("Palabra clave detectada. Escuchando...")
-                return True, detected_text[detected_text.lower().index(clave) + len(clave):].strip()
+                return True, detected_text[detected_text.index(clave) + len(clave):].strip()
             else:
                 return False, ""
-        except sr.UnknownValueError:
-            print("No se pudo entender el audio, intentando de nuevo...")
-        except sr.RequestError as e:
-            print(f"Error de la API de reconocimiento de voz; {e}")
         except sr.WaitTimeoutError:
             print("No se detectó ninguna entrada de voz.")
+        except Exception as e:
+            print(f"Error durante la detección de la palabra clave: {e}")
     return False, ""
 
-def listen_for_question():
+def conversacion_fluida():
+    recognizer = sr.Recognizer()
     with sr.Microphone() as source:
-        print("Escuchando pregunta...")
-        listener.adjust_for_ambient_noise(source)
+        print("Escuchando...")
+        recognizer.adjust_for_ambient_noise(source)
         try:
-            audio = listener.listen(source, timeout=5, phrase_time_limit=5)
-            detected_text = listener.recognize_google(audio, language='es-ES')
-            return detected_text.strip()
-        except sr.UnknownValueError:
-            print("No se pudo entender el audio.")
-        except sr.RequestError as e:
-            print(f"Error de la API de reconocimiento de voz; {e}")
+            audio = recognizer.listen(source, timeout=5, phrase_time_limit=5)
+            with open(path, "wb") as f:
+                f.write(audio.get_wav_data())
+
+            result = model.transcribe(path, language="spanish")
+            detected_text = result["text"].strip().lower()
+            return detected_text
         except sr.WaitTimeoutError:
             print("No se detectó ninguna entrada de voz.")
+        except Exception as e:
+            print(f"Error durante la conversación fluida: {e}")
     return ""
-
-def recognize_audio(path):
-    model = whisper.load_model("base")
-    transcription = model.transcribe(path, language="spanish", fp16=False)
-    return transcription["text"]
-
-def cambiarHora():
-    now = datetime.datetime.now()
-    current_time = now.strftime("%H:%M")
-    filepath = 'docs/time.txt'
-
-    with open(filepath, 'w') as archivo:
-        archivo.write("Hora actual: " + current_time)
-
-    with open(filepath, 'rb') as archivo:
-        files = {"file": archivo}
-        response = requests.post(urlDoc, files=files)
-
-        if response.status_code == 200:
-            print("Cambio de hora realizado")
-        else:
-            print(f"Error al enviar archivo: Código de estado {response.status_code}")
-
-    return current_time
-
-def check_medication_times(medications, current_time):
-    need_to_take = []
-    for med in medications:
-        name = med['name']
-        alt_name = med.get('alt_name', 'N/A')
-        for time_entry in med['hours']:
-            if time_entry['hour'] == current_time and time_entry['taken'] == True:
-                time_entry['taken'] = False
-                need_to_take.append((name, alt_name, time_entry))
-
-                tomar_medicamento = (f"Es hora de tomar tu medicamento: {name} ({alt_name})")
-                print(tomar_medicamento)
-                talk(tomar_medicamento)
-    return need_to_take
-
-def save_medications(medications):
-    with open('docs/medicamentos.txt', 'w') as file:
-        json.dump(medications, file, indent=4)
-
-def preguntar_medicamento(medicamento, medications):
-    print(f"¿Has tomado tu medicamento {medicamento['name']} ({medicamento['alt_name']})?")
-    talk(f"¿Has tomado tu medicamento {medicamento['name']} ({medicamento['alt_name']})?")
-    respuesta = listen_for_confirmation()
-    if respuesta == "sí":
-        for med in medications:
-            if med['name'] == medicamento['name'] and med.get('alt_name') == medicamento['alt_name']:
-                for time_entry in med['hours']:
-                    if time_entry['hour'] == medicamento['hour']:
-                        time_entry['taken'] = True
-                        break
-        print("Gracias por confirmar. Marcaré el medicamento como tomado.")
-        talk("Gracias por confirmar. Marcaré el medicamento como tomado.")
-        save_medications(medications)
-        return True
-    else:
-        print("Te volveré a preguntar en 30 minutos.")
-        talk("Te volveré a preguntar en 30 minutos.")
-        return False
-
-def listen_for_confirmation():
-    with sr.Microphone() as source:
-        print("Esperando confirmación...")
-        listener.adjust_for_ambient_noise(source)
-        try:
-            audio = listener.listen(source, timeout=5, phrase_time_limit=5)
-            detected_text = listener.recognize_google(audio, language='es-ES')
-            if "sí" in detected_text.lower():
-                return "sí"
-            elif "no" in detected_text.lower():
-                return "no"
-        except sr.UnknownValueError:
-            print("No se pudo entender el audio.")
-        except sr.RequestError as e:
-            print(f"Error de la API de reconocimiento de voz; {e}")
-        except sr.WaitTimeoutError:
-            print("No se detectó ninguna entrada de voz.")
-    return "no"
-
-def cargarMedicamentos():
-    with open('docs/medicamentos.txt', 'rb') as archivo:
-        files = {"file": archivo}
-        response = requests.post(urlDoc, files=files)
-
-        if response.status_code == 200:
-            print("Medicamentos cargados")
-        else:
-            print(f"Error al enviar archivo: Código de estado {response.status_code}")
 
 def borrarBD():
     folder = "db"
@@ -171,51 +87,98 @@ def borrarBD():
             print(f'Failed to delete {file_path}. Reason: {e}')
     print("Base de datos borrada")
 
-def verificar_pendientes(medications):
-    global pendientes
-    nuevas_pendientes = []
-    for tarea in pendientes:
-        med_name, med_alt_name, med_entry, last_checked = tarea
-        if (datetime.datetime.now() - last_checked).total_seconds() >= 1800:  # 30 minutos
-            if preguntar_medicamento({"name": med_name, "alt_name": med_alt_name, "hour": med_entry['hour'], "taken": med_entry['taken']}, medications):
-                med_entry['taken'] = True
+def cargarMedicamentos():
+    try:
+        with open('docs/medicamentos.txt', 'rb') as archivo:
+            files = {"file": archivo}
+            response = requests.post(urlDoc, files=files)
+
+            if response.status_code == 200:
+                print("Medicamentos cargados")
             else:
-                nuevas_pendientes.append((med_name, med_alt_name, med_entry, datetime.datetime.now()))
-        else:
-            nuevas_pendientes.append(tarea)
-    pendientes = nuevas_pendientes
-    save_medications(medications)
+                print(f"Error al enviar archivo: Código de estado {response.status_code}")
+    except Exception as e:
+        print(f"Error al cargar medicamentos: {e}")
 
-def main():
-    borrarBD()
-    current_time = cambiarHora()
-    cargarMedicamentos()
+def horaActual():
+    return datetime.datetime.now().strftime("%H:%M")
 
+def registrar_evento(mensaje):
+    try:
+        with open(log_file, 'a') as log:
+            fecha = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            log.write(f"{fecha} - {mensaje}\n")
+    except Exception as e:
+        print(f"Error al escribir en el log: {e}")
+
+def existe_aviso_para_medicamento(nombre_medicamento):
+    for aviso in avisos:
+        if aviso[0] == nombre_medicamento:
+            return True
+    return False
+
+def borrar_avisos():
+    now = datetime.datetime.now().strftime("%H:%M")
+    
+    for aviso in avisos:
+        if (aviso[2] == -1 or aviso[2] == 3) and aviso[1].strftime("%H:%M") != now:
+            avisos.remove(aviso)
+
+def verificar_medicamentos():
+    try:
+        with open('docs/medicamentos.txt', 'r') as archivo:
+            medicamentos = json.load(archivo)
+
+        current_time = horaActual()
+
+        for med in medicamentos:
+            if current_time in med["hours"] and not existe_aviso_para_medicamento(med['name']):
+                anunciar_aviso = f"Es hora de tomar su medicamento: {med['name']} ({med['alt_name']})."
+                registrar_evento(anunciar_aviso)
+                avisos.append((med['name'], datetime.datetime.now(), 0))
+                print(anunciar_aviso)
+                talk(anunciar_aviso)
+
+    except Exception as e:
+        print(f"Error en la verificación de medicamentos: {e}")
+
+
+def verificar_tomas():
+    borrar_avisos()
+
+    now = datetime.datetime.now()
+    
+    for aviso in avisos:
+        med_name, notif_time, veces = aviso
+        if (now - notif_time).total_seconds() >= 15 and veces != -1 and veces != 3:
+            print(f"¿Ha tomado su medicamento {med_name}?")
+            talk(f"¿Ha tomado su medicamento {med_name}?")
+            respuesta = conversacion_fluida()
+            print("Usuario: " + respuesta)
+            if "sí" in respuesta.lower() or "si" in respuesta.lower():
+                registrar_evento(f"El usuario ha confirmado la toma de {med_name}.")
+                veces = -1
+            else:
+                registrar_evento(f"El usuario no ha confirmado la toma de {med_name}.")
+                veces += 1
+
+            index = avisos.index(aviso)
+            avisos[index] = (med_name, now, veces)
+                
+
+def ejecutar_programa_principal():
     while True:
-        if current_time != datetime.datetime.now().strftime("%H:%M"):
-            current_time = cambiarHora()
-
-        with open('docs/medicamentos.txt', 'r') as file:
-            medications = json.load(file)
-
-        need_to_take = check_medication_times(medications, current_time)
-
-        for med in need_to_take:
-            pendientes.append((med[0], med[1], med[2], datetime.datetime.now()))
-
-        verificar_pendientes(medications)
-
-        keyword_detected, message = listen_once()
-        if keyword_detected:
-            print("\nMensaje recibido después de la palabra clave")
-            while True:
-                if message:
-                    print("Usuario: " + message)
-                    if message.lower().__contains__('terminar'):
-                        talk("Terminar")
-                        return
-                    else:
-                        data = {"query": message}
+        try:
+            verificar_tomas()
+            verificar_medicamentos()
+            
+            keyword_detected, message = esperando_clave()
+            if keyword_detected:
+                print("\nMensaje recibido después de la palabra clave")
+                while True:
+                    if message:
+                        print("Usuario: " + message)
+                        data = {"query": "La hora actual es: " + horaActual() + ". Respondeme a lo siguiente: " + message}
                         print("Generando respuesta...")
                         response = requests.post(url, json=data)
                         if response.status_code == 200:
@@ -226,14 +189,26 @@ def main():
                             print(f"Error al generar respuesta: Código de estado {response.status_code}")
                             talk(f"Error al generar respuesta: Código de estado {response.status_code}")
 
-                print("Esperando 5 segundos para otra pregunta...")
-                message = listen_for_question()
-                if not message:
-                    break
+                        message = ""
 
-        else:
-            print("Palabra clave no detectada, reintentando...")
-            time.sleep(1)
+                    print("Esperando 5 segundos para otra pregunta...")
+                    message = conversacion_fluida()
+                    if not message:
+                        break
+
+            else:
+                print("Palabra clave no detectada, reintentando...")
+        except Exception as e:
+            print(f"Error en el programa principal: {e}")
+
+def main():
+    try:
+        borrarBD()
+        cargarMedicamentos()
+
+        ejecutar_programa_principal()
+    except Exception as e:
+        print(f"Error en el hilo principal: {e}")
 
 if __name__ == "__main__":
     main()

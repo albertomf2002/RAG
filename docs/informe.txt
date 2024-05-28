@@ -1,0 +1,10 @@
+Informe de Adherencia del Paciente
+-----------------------------------
+Total de medicamentos programados: 48
+Total de medicamentos confirmados: 46
+Porcentaje de adherencia: 95.83%
+
+Adherencia por medicamento:
+Advil: 100.00% (Confirmados: 8, Total: 8)
+Difenhidramina: 91.67% (Confirmados: 22, Total: 24)
+Acetaminofen: 100.00% (Confirmados: 16, Total: 16)

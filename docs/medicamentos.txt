@@ -2,43 +2,16 @@
     {
         "name": "Acetaminofen",
         "alt_name": "Paracetamol",
-        "hours": [
-            {
-                "hour": "14:00",
-                "taken": true
-            },
-            {
-                "hour": "22:00",
-                "taken": true
-            }
-        ]
+        "hours": ["14:00", "22:00"]
     },
     {
         "name": "Advil",
         "alt_name": "Ibuprofeno",
-        "hours": [
-            {
-                "hour": "00:07",
-                "taken": true
-            }
-        ]
+        "hours": ["16:31"]
     },
     {
         "name": "Difenhidramina",
         "alt_name": "Benadryl",
-        "hours": [
-            {
-                "hour": "08:00",
-                "taken": true
-            },
-            {
-                "hour": "14:00",
-                "taken": true
-            },
-            {
-                "hour": "22:00",
-                "taken": true
-            }
-        ]
+        "hours": ["08:00", "14:00", "22:00"]
     }
 ]

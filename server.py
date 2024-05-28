@@ -1,6 +1,5 @@
 import os
-from flask import Flask, request
-from flask import jsonify
+from flask import Flask, request, jsonify
 
 from langchain_community.llms import Ollama
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
@@ -27,7 +26,9 @@ raw_prompt = PromptTemplate.from_template("""
         Eres un asistente enfocado al cuidado de personas mayores. 
         La respuesta debe ser siempre en español. 
         Nunca hagas introducción o te dirijas al usuario, responde directamente a la pregunta o frase que te formulen.
-        Te he proporcionado un archivo denominado time.txt para que sepas la hora actual, es importante que única y exclusivamente tengas en cuenta la hora actual del último archivo time.txt que se te ha proporcionado, ningún otro.
+        Trata de hacer una respuesta sencilla y concisa con la información solicitada.
+        En las preguntes que te haga, te paso la hora actual solo para que lo tengas en cuenta.
+        Te he proporcionado un archivo denominado medicamentos.txt con el nombre de los medicamentos que me tengo que tomar y las horas de toma.
         Si no puedes proporcionar una respuesta sacada de la información proporcionada, dilo.
     [/INST] </s>
                                           
@@ -54,6 +55,7 @@ def askPost():
 
 @app.route("/docs", methods=["POST"])
 def docPost():
+    print("Post /docs called")
     file = request.files["file"]
     file_name = file.filename
     save_file = "docs/" + file_name
@@ -72,10 +74,60 @@ def docPost():
     response = {"status": "Succesfully Uploaded", "filename": file_name, "doc_len": len(docs), "chucks": len(chunks)}
     return response
 
+@app.route("/informe", methods=["POST"])
+def generate_adherence_report():
+    log_file_path = 'docs/log.txt'
+    report_file_path = 'docs/informe.txt'
+
+    if not os.path.exists(log_file_path):
+        return jsonify({"status": "error", "message": "log.txt not found"}), 404
+
+    adherence_data = {}
+    total_medications = 0
+    confirmed_takes = 0
+
+    try:
+        with open(log_file_path, 'r') as log_file:
+            lines = log_file.readlines()
+
+        for line in lines:
+            if "Es hora de tomar su medicamento:" in line:
+                total_medications += 1
+                med_name = line.split("Es hora de tomar su medicamento:")[1].split('(')[0].strip()
+                if med_name not in adherence_data:
+                    adherence_data[med_name] = {"total": 0, "confirmed": 0}
+                adherence_data[med_name]["total"] += 1
+            elif "El usuario ha confirmado la toma de" in line:
+                confirmed_takes += 1
+                med_name = line.split("El usuario ha confirmado la toma de")[1].strip().replace('.', '')
+                if med_name in adherence_data:
+                    adherence_data[med_name]["confirmed"] += 1
+
+        adherence_percentage = (confirmed_takes / total_medications) * 100 if total_medications > 0 else 0
+
+        report_lines = [
+            "Informe de Adherencia del Paciente",
+            "-----------------------------------",
+            f"Total de medicamentos programados: {total_medications}",
+            f"Total de medicamentos confirmados: {confirmed_takes}",
+            f"Porcentaje de adherencia: {adherence_percentage:.2f}%",
+            "\nAdherencia por medicamento:",
+        ]
+
+        for med_name, data in adherence_data.items():
+            med_adherence = (data["confirmed"] / data["total"]) * 100 if data["total"] > 0 else 0
+            report_lines.append(f"{med_name}: {med_adherence:.2f}% (Confirmados: {data['confirmed']}, Total: {data['total']})")
+
+        with open(report_file_path, 'w') as report_file:
+            report_file.write("\n".join(report_lines))
+
+        return jsonify({"status": "success", "message": "Adherence report generated successfully", "report_file": "informe.txt"})
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 def start_app():
     app.run(host="0.0.0.0", port=8080, debug=True)
-
 
 if __name__ == "__main__":
     start_app()
