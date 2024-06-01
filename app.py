@@ -6,12 +6,12 @@ import os
 import tempfile
 import datetime
 import whisper
-import threading
 import json
 
 url = "http://localhost:8080/ask"
 urlDoc = "http://localhost:8080/docs"
-log_file = 'docs/log.txt'
+log_file = 'docs/log_tomas.txt'
+log_estado_file = 'docs/log_estado.txt'
 
 file = tempfile.mkdtemp()
 path = os.path.join(file, 'temp.wav')
@@ -103,7 +103,7 @@ def cargarMedicamentos():
 def horaActual():
     return datetime.datetime.now().strftime("%H:%M")
 
-def registrar_evento(mensaje):
+def registrar_evento(mensaje, log_file):
     try:
         with open(log_file, 'a') as log:
             fecha = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -134,7 +134,7 @@ def verificar_medicamentos():
         for med in medicamentos:
             if current_time in med["hours"] and not existe_aviso_para_medicamento(med['name']):
                 anunciar_aviso = f"Es hora de tomar su medicamento: {med['name']} ({med['alt_name']})."
-                registrar_evento(anunciar_aviso)
+                registrar_evento(anunciar_aviso, log_file)
                 avisos.append((med['name'], datetime.datetime.now(), 0))
                 print(anunciar_aviso)
                 talk(anunciar_aviso)
@@ -156,10 +156,10 @@ def verificar_tomas():
             respuesta = conversacion_fluida()
             print("Usuario: " + respuesta)
             if "sí" in respuesta.lower() or "si" in respuesta.lower():
-                registrar_evento(f"El usuario ha confirmado la toma de {med_name}.")
+                registrar_evento(f"El usuario ha confirmado la toma de {med_name}.", log_file)
                 veces = -1
             else:
-                registrar_evento(f"El usuario no ha confirmado la toma de {med_name}.")
+                registrar_evento(f"El usuario no ha confirmado la toma de {med_name}.", log_file)
                 veces += 1
 
             index = avisos.index(aviso)
@@ -178,16 +178,29 @@ def ejecutar_programa_principal():
                 while True:
                     if message:
                         print("Usuario: " + message)
-                        data = {"query": "La hora actual es: " + horaActual() + ". Respondeme a lo siguiente: " + message}
-                        print("Generando respuesta...")
-                        response = requests.post(url, json=data)
-                        if response.status_code == 200:
-                            response_data = response.json()
-                            print(f"Respuesta: {response_data}")
-                            talk(response_data)
+                        if "hola" in message.lower():
+                            respuesta = "Hola, ¿qué tal estás?"
+                            print(f"Respuesta: {respuesta}")
+                            talk(respuesta)
+
+                            user_response = conversacion_fluida()
+                            registrar_evento(user_response, log_estado_file)
+
+                            respuesta = "Estado de ánimo registrado. ¿Qué más puedo hacer por ti?"
+                            print(f"Respuesta: {respuesta}")
+                            talk(respuesta)
                         else:
-                            print(f"Error al generar respuesta: Código de estado {response.status_code}")
-                            talk(f"Error al generar respuesta: Código de estado {response.status_code}")
+                            data = {"query": "La hora actual es: " + horaActual() + ". Respondeme a lo siguiente: " + message}
+                            print("Generando respuesta...")
+                            response = requests.post(url, json=data)
+                            if response.status_code == 200:
+                                response_data = response.json()
+                                respuesta = response_data["answer"]
+                                print(f"Respuesta: {respuesta}")
+                                talk(respuesta)
+                            else:
+                                print(f"Error al generar respuesta: Código de estado {response.status_code}")
+                                talk(f"Error al generar respuesta: Código de estado {response.status_code}")
 
                         message = ""
 

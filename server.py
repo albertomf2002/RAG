@@ -1,5 +1,6 @@
-import os
+# -*- coding: utf-8 -*-
 from flask import Flask, request, jsonify
+import os
 
 from langchain_community.llms import Ollama
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
@@ -7,7 +8,6 @@ from langchain_community.document_loaders import TextLoader
 from langchain_community.vectorstores import Chroma
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-
 from langchain.prompts import PromptTemplate
 
 from langchain.chains.combine_documents import create_stuff_documents_chain
@@ -37,21 +37,52 @@ raw_prompt = PromptTemplate.from_template("""
     [/INST]                                
 """)
 
+# Historial de conversación
+conversation_history = []
+
 @app.route("/ask", methods=["POST"])
 def askPost():
     print("Post /ask called")
     json_content = request.json
     query = json_content.get("query")
 
-    vector_store = Chroma(persist_directory="db", embedding_function=embedding)
-    retriever = vector_store.as_retriever(search_type="similarity_score_threshold", search_kwargs={"k": 20, "score_threshold": 0.1})
-    document_chain = create_stuff_documents_chain(llm, raw_prompt)
-    chain = create_retrieval_chain(retriever, document_chain)
+    try:
+        # Actualizar historial de conversación
+        conversation_history.append(f"Usuario: {query}")
 
-    response = chain.invoke({"input": query})
-    response_answer = response["answer"]
+        if "medicamento" in query.lower() or "medicina" in query.lower():
+            vector_store = Chroma(persist_directory="db", embedding_function=embedding)
+            retriever = vector_store.as_retriever(search_type="similarity_score_threshold", search_kwargs={"k": 20, "score_threshold": 0.1})
+            document_chain = create_stuff_documents_chain(llm, raw_prompt)
+            chain = create_retrieval_chain(retriever, document_chain)
+            response = chain.invoke({"input": query})
+            response_answer = response["answer"]
+        else:
+            # Generar respuesta sin RAG
+            open_prompt = f"""
+            <s> [INST] 
+                La respuesta debe ser siempre en español. 
+                Nunca hagas introducción o te dirijas al usuario, responde directamente a la pregunta o frase que te formulen.
+                Trata de hacer una respuesta corta, sencilla y concisa con la información solicitada.
+                En las preguntes que te haga, te paso la hora actual solo para que lo tengas en cuenta.
+                Aquí está el historial de la conversación hasta ahora:
+                {' '.join(conversation_history)}
+            [/INST] </s>
+                                                  
+            [INST]  {query}
+            [/INST]
+            """
+            
+            response_answer = llm.invoke(open_prompt)
 
-    return jsonify(response_answer)
+        # Actualizar historial de conversación con la respuesta
+        conversation_history.append(f"Asistente: {response_answer}")
+
+        return jsonify({"answer": response_answer})
+
+    except Exception as e:
+        print(f"Error al generar respuesta: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/docs", methods=["POST"])
 def docPost():
@@ -76,18 +107,24 @@ def docPost():
 
 @app.route("/informe", methods=["POST"])
 def generate_adherence_report():
-    log_file_path = 'docs/log.txt'
-    report_file_path = 'docs/informe.txt'
+    log_tomas_path = 'docs/log_tomas.txt'
+    log_estado_path = 'docs/log_estado.txt'
+    report_tomas_path = 'docs/informe_tomas.txt'
+    report_estado_path = 'docs/informe_estado.txt'
 
-    if not os.path.exists(log_file_path):
-        return jsonify({"status": "error", "message": "log.txt not found"}), 404
+    if not os.path.exists(log_tomas_path):
+        return jsonify({"status": "error", "message": "log_tomas.txt not found"}), 404
+
+    if not os.path.exists(log_estado_path):
+        return jsonify({"status": "error", "message": "log_estado.txt not found"}), 404
 
     adherence_data = {}
     total_medications = 0
     confirmed_takes = 0
 
     try:
-        with open(log_file_path, 'r') as log_file:
+        # Generar informe cuantitativo
+        with open(log_tomas_path, 'r', encoding='utf-8') as log_file:
             lines = log_file.readlines()
 
         for line in lines:
@@ -118,10 +155,30 @@ def generate_adherence_report():
             med_adherence = (data["confirmed"] / data["total"]) * 100 if data["total"] > 0 else 0
             report_lines.append(f"{med_name}: {med_adherence:.2f}% (Confirmados: {data['confirmed']}, Total: {data['total']})")
 
-        with open(report_file_path, 'w') as report_file:
+        with open(report_tomas_path, 'w', encoding='utf-8') as report_file:
             report_file.write("\n".join(report_lines))
 
-        return jsonify({"status": "success", "message": "Adherence report generated successfully", "report_file": "informe.txt"})
+        # Generar informe cualitativo
+        with open(log_estado_path, 'r', encoding='utf-8') as log_file:
+            estado_lines = log_file.readlines()
+
+        estado_context = " ".join(estado_lines)
+        qualitative_prompt = f"""
+        <s> [INST] 
+            Eres un asistente enfocado al cuidado de personas mayores. 
+            La respuesta debe ser siempre en español. 
+            Necesito que generes un informe cualitativo del estado de ánimo del paciente basado en los siguientes registros:
+            {estado_context}
+        [/INST] </s>
+        """
+
+        qualitative_response = llm.invoke(qualitative_prompt)
+        qualitative_report = qualitative_response if isinstance(qualitative_response, str) else qualitative_response["text"]
+
+        with open(report_estado_path, 'w', encoding='utf-8') as report_file:
+            report_file.write(qualitative_report)
+
+        return jsonify({"status": "success", "message": "Reports generated successfully", "report_tomas_file": "informe_tomas.txt", "report_estado_file": "informe_estado.txt"})
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
