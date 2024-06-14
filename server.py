@@ -6,6 +6,9 @@ import time
 import psutil
 import pandas as pd
 from openpyxl import load_workbook
+import nltk
+from nltk.tokenize import word_tokenize
+
 
 from langchain_community.llms import Ollama
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
@@ -21,6 +24,8 @@ from langchain.chains import create_retrieval_chain
 app = Flask(__name__)
 
 llm = Ollama(model="llama3")
+
+nltk.download('punkt')
 
 embedding = FastEmbedEmbeddings()
 
@@ -109,7 +114,8 @@ def askPost():
 
         end_time = time.time()
         time_taken = end_time - start_time
-        token_count = len(response_answer.split()) 
+        tokens = word_tokenize(response_answer)
+        token_count = len(tokens)
         tokens_per_second = token_count / time_taken if time_taken > 0 else 0
 
         cpu_after = psutil.cpu_percent(interval=None)
@@ -221,7 +227,8 @@ def generate_adherence_report():
 
         end_time = time.time()
         time_taken = end_time - start_time
-        token_count = len(qualitative_response.split()) 
+        tokens = word_tokenize(qualitative_response)
+        token_count = len(tokens)
         tokens_per_second = token_count / time_taken if time_taken > 0 else 0
 
         cpu_after = psutil.cpu_percent(interval=None)
