@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
+import datetime
 from flask import Flask, request, jsonify
 import os
+import time
+import psutil
+import pandas as pd
+from openpyxl import load_workbook
 
 from langchain_community.llms import Ollama
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
@@ -37,8 +42,31 @@ raw_prompt = PromptTemplate.from_template("""
     [/INST]                                
 """)
 
-# Historial de conversación
 conversation_history = []
+
+def guardar_en_excel(date_time, query_type, tokens, time_taken, tokens_per_sec, cpu_usage, memory_usage):
+    file_name = "rendimiento.xlsx"
+    sheet_name = 'Hoja1'
+    data = {
+        "Fecha y Hora": [date_time],
+        "Tipo de Input": [query_type],
+        "Tokens Generados": [tokens],
+        "Tiempo de Generación (s)": [time_taken],
+        "Tokens por Segundo": [tokens_per_sec],
+        "CPU Usado (%)": [cpu_usage],
+        "Memoria Usada (bytes)": [memory_usage]
+    }
+    
+    try:
+        with pd.ExcelWriter(file_name, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
+            old_data = pd.read_excel(file_name, sheet_name=sheet_name)
+            new_data = pd.DataFrame(data)
+            updated_data = pd.concat([old_data, new_data], ignore_index=True)
+            updated_data.to_excel(writer, sheet_name=sheet_name, index=False)
+    except FileNotFoundError:
+        with pd.ExcelWriter(file_name, engine='openpyxl') as writer:
+            new_data = pd.DataFrame(data)
+            new_data.to_excel(writer, sheet_name=sheet_name, index=False)
 
 @app.route("/ask", methods=["POST"])
 def askPost():
@@ -47,10 +75,14 @@ def askPost():
     query = json_content.get("query")
 
     try:
-        # Actualizar historial de conversación
         conversation_history.append(f"Usuario: {query}")
 
+        start_time = time.time()
+        cpu_before = psutil.cpu_percent(interval=None)
+        memory_before = psutil.virtual_memory().used
+        
         if "medicamento" in query.lower() or "medicina" in query.lower():
+            query_type = "Consulta con RAG"
             vector_store = Chroma(persist_directory="db", embedding_function=embedding)
             retriever = vector_store.as_retriever(search_type="similarity_score_threshold", search_kwargs={"k": 20, "score_threshold": 0.1})
             document_chain = create_stuff_documents_chain(llm, raw_prompt)
@@ -58,7 +90,7 @@ def askPost():
             response = chain.invoke({"input": query})
             response_answer = response["answer"]
         else:
-            # Generar respuesta sin RAG
+            query_type = "Consulta sin RAG"
             open_prompt = f"""
             <s> [INST] 
                 La respuesta debe ser siempre en español. 
@@ -75,7 +107,18 @@ def askPost():
             
             response_answer = llm.invoke(open_prompt)
 
-        # Actualizar historial de conversación con la respuesta
+        end_time = time.time()
+        time_taken = end_time - start_time
+        token_count = len(response_answer.split()) 
+        tokens_per_second = token_count / time_taken if time_taken > 0 else 0
+
+        cpu_after = psutil.cpu_percent(interval=None)
+        memory_after = psutil.virtual_memory().used
+        cpu_used = cpu_after - cpu_before
+        memory_used = memory_after - memory_before
+
+        guardar_en_excel(datetime.datetime.now(), query_type, token_count, time_taken, tokens_per_second, cpu_used, memory_used)
+
         conversation_history.append(f"Asistente: {response_answer}")
 
         return jsonify({"answer": response_answer})
@@ -102,7 +145,7 @@ def docPost():
 
     Chroma.from_documents(documents=chunks, embedding=embedding, persist_directory="db")
 
-    response = {"status": "Succesfully Uploaded", "filename": file_name, "doc_len": len(docs), "chucks": len(chunks)}
+    response = {"status": "Successfully Uploaded", "filename": file_name, "doc_len": len(docs), "chunks": len(chunks)}
     return response
 
 @app.route("/informe", methods=["POST"])
@@ -123,7 +166,6 @@ def generate_adherence_report():
     confirmed_takes = 0
 
     try:
-        # Generar informe cuantitativo
         with open(log_tomas_path, 'r', encoding='utf-8') as log_file:
             lines = log_file.readlines()
 
@@ -158,7 +200,6 @@ def generate_adherence_report():
         with open(report_tomas_path, 'w', encoding='utf-8') as report_file:
             report_file.write("\n".join(report_lines))
 
-        # Generar informe cualitativo
         with open(log_estado_path, 'r', encoding='utf-8') as log_file:
             estado_lines = log_file.readlines()
 
@@ -172,7 +213,24 @@ def generate_adherence_report():
         [/INST] </s>
         """
 
+        start_time = time.time()
+        cpu_before = psutil.cpu_percent(interval=None)
+        memory_before = psutil.virtual_memory().used
+
         qualitative_response = llm.invoke(qualitative_prompt)
+
+        end_time = time.time()
+        time_taken = end_time - start_time
+        token_count = len(qualitative_response.split()) 
+        tokens_per_second = token_count / time_taken if time_taken > 0 else 0
+
+        cpu_after = psutil.cpu_percent(interval=None)
+        memory_after = psutil.virtual_memory().used
+        cpu_used = cpu_after - cpu_before
+        memory_used = memory_after - memory_before
+
+        guardar_en_excel(datetime.datetime.now(), "Informe", token_count, time_taken, tokens_per_second, cpu_used, memory_used)
+
         qualitative_report = qualitative_response if isinstance(qualitative_response, str) else qualitative_response["text"]
 
         with open(report_estado_path, 'w', encoding='utf-8') as report_file:

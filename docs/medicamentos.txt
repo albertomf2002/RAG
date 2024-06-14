@@ -7,7 +7,7 @@
     {
         "name": "Advil",
         "alt_name": "Ibuprofeno",
-        "hours": ["16:31"]
+        "hours": ["08:00"]
     },
     {
         "name": "Difenhidramina",
